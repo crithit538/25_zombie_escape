@@ -36,16 +36,26 @@ class Zombie:
         wobble_y = int(math.sin(self.frame*0.2)*3)
         draw_rect = self.rect.move(0, wobble_y)
         pygame.draw.rect(screen, self.color, draw_rect, border_radius=5)
+
         for ex in [draw_rect.x+6, draw_rect.x+18]:
-            pygame.draw.circle(screen, (200,40,40), (ex, draw_rect.y+10), 4)
+            pygame.draw.circle(
+                screen,
+                (200,40,40),
+                (ex, draw_rect.y+10),
+                4
+            )
 
 
 def spawn_zombie(width, height, player_rect, margin=120):
     while True:
         x = random.randint(0, width-30)
         y = random.randint(0, height-30)
+
         rect = pygame.Rect(x, y, 30, 30)
-        if not rect.colliderect(player_rect.inflate(margin, margin)):
+
+        if not rect.colliderect(
+            player_rect.inflate(margin, margin)
+        ):
             return Zombie(x, y)
 
 
@@ -62,10 +72,16 @@ class Player:
         # Task 1: Health system
         self.max_hp = 3
         self.hp = 3
-
-        # 90 frames = 1.5 seconds at 60 FPS
         self.invincibility_timer = 0
         self.invincibility_duration = 90
+
+        # Task 2: Ammo system
+        self.max_ammo = 12
+        self.ammo = self.max_ammo
+
+        # Reload timer in milliseconds
+        self.reload_duration = 2000
+        self.reload_timer = 0
 
     def move(self, keys, width, height):
         dx = dy = 0
@@ -83,6 +99,7 @@ class Player:
             0,
             min(width-self.rect.width, self.rect.x+dx)
         )
+
         self.rect.y = max(
             0,
             min(height-self.rect.height, self.rect.y+dy)
@@ -91,16 +108,32 @@ class Player:
         if self.shoot_cooldown > 0:
             self.shoot_cooldown -= 1
 
-        # Count down invincibility timer
+        # Task 1: Invincibility countdown
         if self.invincibility_timer > 0:
             self.invincibility_timer -= 1
 
+        # Task 2: Reload countdown
+        if self.reload_timer > 0:
+            self.reload_timer -= 1
+
+            if self.reload_timer <= 0:
+                self.ammo = self.max_ammo
+
     def shoot(self, target_pos):
+        # Cannot shoot while reloading
+        if self.reload_timer > 0:
+            return
+
+        # Cannot shoot when magazine is empty
+        if self.ammo <= 0:
+            return
+
         if self.shoot_cooldown > 0:
             return
 
         cx, cy = self.rect.center
         tx, ty = target_pos
+
         dx, dy = tx-cx, ty-cy
         dist = (dx**2+dy**2)**0.5
 
@@ -112,12 +145,21 @@ class Player:
         self.bullets.append(
             pygame.Rect(cx-4, cy-4, 8, 8)
         )
+
         self.bullets.append(
             [cx-4, cy-4, vx, vy]
         )
+
         self.bullets.pop(-2)
 
         self.shoot_cooldown = 15
+
+        # One bullet used
+        self.ammo -= 1
+
+        # Automatically start reload when magazine becomes empty
+        if self.ammo == 0:
+            self.reload_timer = self.reload_duration
 
     def update_bullets(self, width, height):
         live = []
@@ -132,20 +174,17 @@ class Player:
         self.bullets = live
 
     def take_damage(self):
-        # Ignore damage during the invincibility window
+        # Task 1
         if self.invincibility_timer > 0:
             return False
 
         self.hp -= 1
-
-        # Start invincibility after being hit
         self.invincibility_timer = self.invincibility_duration
 
-        # Return True only when HP reaches zero
         return self.hp <= 0
 
     def draw(self, screen):
-        # Blink while invincible
+        # Task 1: Blink while invincible
         if self.invincibility_timer > 0:
             if (self.invincibility_timer // 5) % 2 == 0:
                 pygame.draw.rect(
@@ -174,22 +213,40 @@ class Player:
 class GameEngine:
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+        self.screen = pygame.display.set_mode(
+            (WIDTH, HEIGHT)
+        )
+
         pygame.display.set_caption("Zombie Escape")
+
         self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont("monospace", 24)
+
+        self.font = pygame.font.SysFont(
+            "monospace",
+            24
+        )
+
         self.big_font = pygame.font.SysFont(
             "monospace",
             44,
             bold=True
         )
+
         self.reset()
 
     def reset(self):
-        self.player = Player(WIDTH//2, HEIGHT//2)
+        self.player = Player(
+            WIDTH//2,
+            HEIGHT//2
+        )
 
         self.zombies = [
-            spawn_zombie(WIDTH, HEIGHT, self.player.rect)
+            spawn_zombie(
+                WIDTH,
+                HEIGHT,
+                self.player.rect
+            )
             for _ in range(4)
         ]
 
@@ -207,10 +264,12 @@ class GameEngine:
                 return False
 
             if event.type == pygame.KEYDOWN:
+
                 if event.key == pygame.K_r:
                     self.reset()
 
             if event.type == pygame.MOUSEBUTTONDOWN:
+
                 if not self.game_over:
                     self.player.shoot(event.pos)
 
@@ -222,17 +281,31 @@ class GameEngine:
 
         keys = pygame.key.get_pressed()
 
-        self.player.move(keys, WIDTH, HEIGHT)
-        self.player.update_bullets(WIDTH, HEIGHT)
+        self.player.move(
+            keys,
+            WIDTH,
+            HEIGHT
+        )
 
-        self.score = int(time.time() - self.start_time)
+        self.player.update_bullets(
+            WIDTH,
+            HEIGHT
+        )
+
+        self.score = int(
+            time.time() - self.start_time
+        )
 
         for z in self.zombies:
-            z.update(self.player.rect.center)
 
-            if z.rect.colliderect(self.player.rect):
+            z.update(
+                self.player.rect.center
+            )
 
-                # Player loses one HP instead of immediately dying
+            if z.rect.colliderect(
+                self.player.rect
+            ):
+
                 if self.player.take_damage():
                     self.game_over = True
                     break
@@ -243,11 +316,15 @@ class GameEngine:
         dead = []
 
         for z in self.zombies:
+
             for b in self.player.bullets[:]:
 
                 bx, by = int(b[0]), int(b[1])
 
-                if z.rect.collidepoint(bx, by):
+                if z.rect.collidepoint(
+                    bx,
+                    by
+                ):
 
                     if z.hit():
                         dead.append(z)
@@ -256,6 +333,7 @@ class GameEngine:
                         self.player.bullets.remove(b)
 
         for z in dead:
+
             if z in self.zombies:
                 self.zombies.remove(z)
                 self.kills += 1
@@ -265,9 +343,13 @@ class GameEngine:
 
             self.kills = 0
             self.wave += 1
-            self.kills_to_next = 8 + self.wave * 2
+
+            self.kills_to_next = (
+                8 + self.wave * 2
+            )
 
             for _ in range(self.wave + 3):
+
                 self.zombies.append(
                     spawn_zombie(
                         WIDTH,
@@ -280,6 +362,7 @@ class GameEngine:
         self.screen.fill(BG)
 
         for x in range(0, WIDTH, 60):
+
             pygame.draw.line(
                 self.screen,
                 (40,45,35),
@@ -289,6 +372,7 @@ class GameEngine:
             )
 
         for y in range(0, HEIGHT, 60):
+
             pygame.draw.line(
                 self.screen,
                 (40,45,35),
@@ -302,7 +386,12 @@ class GameEngine:
 
         self.player.draw(self.screen)
 
-        hud_bg = pygame.Rect(0, 0, WIDTH, 40)
+        hud_bg = pygame.Rect(
+            0,
+            0,
+            WIDTH,
+            40
+        )
 
         pygame.draw.rect(
             self.screen,
@@ -310,16 +399,40 @@ class GameEngine:
             hud_bg
         )
 
+        # Task 1 + Task 2 HUD
+        if self.player.reload_timer > 0:
+
+            reload_seconds = (
+                self.player.reload_timer / 1000
+            )
+
+            ammo_text = (
+                f"RELOADING: {reload_seconds:.1f}s"
+            )
+
+        else:
+
+            ammo_text = (
+                f"Ammo: {self.player.ammo}/"
+                f"{self.player.max_ammo}"
+            )
+
         hud = self.font.render(
-            f"HP: {self.player.hp}/{self.player.max_hp}  "
+            f"HP: {self.player.hp}/"
+            f"{self.player.max_hp}  "
+            f"{ammo_text}  "
             f"Wave: {self.wave}  "
             f"Score: {self.score}  "
-            f"Kills: {self.kills}/{self.kills_to_next}",
+            f"Kills: {self.kills}/"
+            f"{self.kills_to_next}",
             True,
             (160,220,120)
         )
 
-        self.screen.blit(hud, (8, 8))
+        self.screen.blit(
+            hud,
+            (8, 8)
+        )
 
         if self.game_over:
 
@@ -328,8 +441,14 @@ class GameEngine:
                 pygame.SRCALPHA
             )
 
-            ov.fill((0,0,0,160))
-            self.screen.blit(ov, (0,0))
+            ov.fill(
+                (0,0,0,160)
+            )
+
+            self.screen.blit(
+                ov,
+                (0,0)
+            )
 
             m = self.big_font.render(
                 "DEVOURED!",
@@ -338,7 +457,9 @@ class GameEngine:
             )
 
             s = self.font.render(
-                f"Wave {self.wave} | Score {self.score} | Press R",
+                f"Wave {self.wave} | "
+                f"Score {self.score} | "
+                f"Press R",
                 True,
                 (200,200,200)
             )
@@ -365,9 +486,13 @@ class GameEngine:
         running = True
 
         while running:
+
             running = self.handle_events()
+
             self.update()
+
             self.draw()
+
             self.clock.tick(FPS)
 
         pygame.quit()
