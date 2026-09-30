@@ -3,160 +3,145 @@ import random
 import math
 import time
 
+pygame.init()
+
 WIDTH, HEIGHT = 800, 560
 FPS = 60
-BG = (30,35,25)
+BG = (18, 18, 22)
 
+# -----------------------------
+# Zombie Types
+# -----------------------------
 
 class Zombie:
     SPEED = 1.5
+    MAX_HP = 3
+    SIZE = 30
+    COLOR = (80, 200, 80)
 
     def __init__(self, x, y):
-        self.rect = pygame.Rect(x, y, 30, 30)
-        self.color = (60,140,60)
-        self.hp = 3
-        self.wobble = random.uniform(0, 6.28)
-        self.frame = 0
+        self.rect = pygame.Rect(x, y, self.SIZE, self.SIZE)
+        self.hp = self.MAX_HP
 
-    def update(self, player_pos):
-        px, py = player_pos
-        cx, cy = self.rect.center
-        dx, dy = px-cx, py-cy
-        dist = (dx**2+dy**2)**0.5
+    def update(self, player):
+        dx = player.rect.centerx - self.rect.centerx
+        dy = player.rect.centery - self.rect.centery
+        dist = math.hypot(dx, dy)
 
-        if dist:
-            self.rect.x += int(dx/dist*self.SPEED)
-            self.rect.y += int(dy/dist*self.SPEED)
-
-        self.frame += 1
+        if dist > 0:
+            self.rect.x += int(self.SPEED * dx / dist)
+            self.rect.y += int(self.SPEED * dy / dist)
 
     def hit(self):
         self.hp -= 1
         return self.hp <= 0
 
     def draw(self, screen):
-        wobble_y = int(math.sin(self.frame*0.2)*3)
-        draw_rect = self.rect.move(0, wobble_y)
-
-        pygame.draw.rect(
-            screen,
-            self.color,
-            draw_rect,
-            border_radius=5
-        )
-
-        for ex in [draw_rect.x+6, draw_rect.x+18]:
-            pygame.draw.circle(
-                screen,
-                (200,40,40),
-                (ex, draw_rect.y+10),
-                4
-            )
+        pygame.draw.rect(screen, self.COLOR, self.rect)
 
 
-def spawn_zombie(width, height, player_rect, margin=120):
-    while True:
-        x = random.randint(0, width-30)
-        y = random.randint(0, height-30)
+class FastZombie(Zombie):
+    SPEED = 3.0
+    MAX_HP = 1
+    SIZE = 20
+    COLOR = (80, 180, 255)
 
-        rect = pygame.Rect(
-            x,
-            y,
-            30,
-            30
-        )
 
-        if not rect.colliderect(
-            player_rect.inflate(margin, margin)
-        ):
-            return Zombie(x, y)
+class TankZombie(Zombie):
+    SPEED = 0.8
+    MAX_HP = 6
+    SIZE = 44
+    COLOR = (180, 80, 180)
 
+
+def spawn_zombie(zombie_type="standard"):
+    side = random.choice(["top", "bottom", "left", "right"])
+
+    if side == "top":
+        x = random.randint(0, WIDTH - 30)
+        y = -40
+    elif side == "bottom":
+        x = random.randint(0, WIDTH - 30)
+        y = HEIGHT + 40
+    elif side == "left":
+        x = -40
+        y = random.randint(0, HEIGHT - 30)
+    else:
+        x = WIDTH + 40
+        y = random.randint(0, HEIGHT - 30)
+
+    if zombie_type == "fast":
+        return FastZombie(x, y)
+
+    if zombie_type == "tank":
+        return TankZombie(x, y)
+
+    return Zombie(x, y)
+
+
+# -----------------------------
+# Explosive Barrel
+# -----------------------------
 
 class Barrel:
-    """Explosive barrel that destroys nearby zombies."""
-
     def __init__(self, x, y):
         self.rect = pygame.Rect(x, y, 28, 36)
         self.color = (170, 100, 35)
 
     def draw(self, screen):
+        pygame.draw.rect(screen, self.color, self.rect)
         pygame.draw.rect(
             screen,
-            self.color,
-            self.rect,
-            border_radius=5
+            (90, 50, 20),
+            (self.rect.x, self.rect.y + 7, self.rect.width, 4)
         )
-
-        # Barrel bands
-        pygame.draw.line(
+        pygame.draw.rect(
             screen,
-            (80, 50, 20),
-            (self.rect.left, self.rect.top + 8),
-            (self.rect.right, self.rect.top + 8),
-            3
-        )
-
-        pygame.draw.line(
-            screen,
-            (80, 50, 20),
-            (self.rect.left, self.rect.bottom - 8),
-            (self.rect.right, self.rect.bottom - 8),
-            3
+            (90, 50, 20),
+            (self.rect.x, self.rect.y + 25, self.rect.width, 4)
         )
 
 
-SPEED = 4
-
+# -----------------------------
+# Player
+# -----------------------------
 
 class Player:
-    def __init__(self, x, y):
-        self.rect = pygame.Rect(x, y, 32, 32)
-        self.color = (60,160,220)
-        self.bullets = []
-        self.shoot_cooldown = 0
+    def __init__(self):
+        self.rect = pygame.Rect(WIDTH // 2, HEIGHT // 2, 32, 32)
 
-        # Task 1: Health system
+        # Task 1 - Health
         self.max_hp = 3
         self.hp = 3
         self.invincibility_timer = 0
         self.invincibility_duration = 90
 
-        # Task 2: Ammo system
+        # Task 2 - Ammo
         self.max_ammo = 12
-        self.ammo = self.max_ammo
+        self.ammo = 12
         self.reload_duration = 2000
         self.reload_timer = 0
 
-    def move(self, keys, width, height):
-        dx = dy = 0
+        self.bullets = []
+        self.shoot_cooldown = 0
+
+    def move(self, keys):
+        speed = 4
 
         if keys[pygame.K_w] or keys[pygame.K_UP]:
-            dy = -SPEED
+            self.rect.y -= speed
         if keys[pygame.K_s] or keys[pygame.K_DOWN]:
-            dy = SPEED
+            self.rect.y += speed
         if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-            dx = -SPEED
+            self.rect.x -= speed
         if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-            dx = SPEED
+            self.rect.x += speed
 
-        self.rect.x = max(
-            0,
-            min(width-self.rect.width, self.rect.x+dx)
-        )
+        self.rect.clamp_ip(pygame.Rect(0, 0, WIDTH, HEIGHT))
 
-        self.rect.y = max(
-            0,
-            min(height-self.rect.height, self.rect.y+dy)
-        )
-
-        if self.shoot_cooldown > 0:
-            self.shoot_cooldown -= 1
-
-        # Task 1: invincibility countdown
         if self.invincibility_timer > 0:
             self.invincibility_timer -= 1
 
-        # Task 2: reload countdown
         if self.reload_timer > 0:
             self.reload_timer -= 1000 / FPS
 
@@ -164,60 +149,10 @@ class Player:
                 self.reload_timer = 0
                 self.ammo = self.max_ammo
 
-    def shoot(self, target_pos):
-        # Task 2: cannot shoot while reloading
-        if self.reload_timer > 0:
-            return
-
-        # Task 2: cannot shoot with empty magazine
-        if self.ammo <= 0:
-            return
-
         if self.shoot_cooldown > 0:
-            return
-
-        cx, cy = self.rect.center
-        tx, ty = target_pos
-
-        dx, dy = tx-cx, ty-cy
-        dist = (dx**2+dy**2)**0.5
-
-        if dist == 0:
-            return
-
-        vx, vy = dx/dist*10, dy/dist*10
-
-        self.bullets.append(
-            pygame.Rect(cx-4, cy-4, 8, 8)
-        )
-
-        self.bullets.append(
-            [cx-4, cy-4, vx, vy]
-        )
-
-        self.bullets.pop(-2)
-
-        self.shoot_cooldown = 15
-        self.ammo -= 1
-
-        # Automatically reload when magazine becomes empty
-        if self.ammo == 0:
-            self.reload_timer = self.reload_duration
-
-    def update_bullets(self, width, height):
-        live = []
-
-        for b in self.bullets:
-            b[0] += b[2]
-            b[1] += b[3]
-
-            if 0 <= b[0] <= width and 0 <= b[1] <= height:
-                live.append(b)
-
-        self.bullets = live
+            self.shoot_cooldown -= 1
 
     def take_damage(self):
-        # Task 1
         if self.invincibility_timer > 0:
             return False
 
@@ -226,74 +161,88 @@ class Player:
 
         return self.hp <= 0
 
+    def shoot(self, target_pos):
+        if self.shoot_cooldown > 0:
+            return
+
+        if self.reload_timer > 0:
+            return
+
+        if self.ammo <= 0:
+            return
+
+        dx = target_pos[0] - self.rect.centerx
+        dy = target_pos[1] - self.rect.centery
+        dist = math.hypot(dx, dy)
+
+        if dist == 0:
+            return
+
+        speed = 10
+        vx = speed * dx / dist
+        vy = speed * dy / dist
+
+        self.bullets.append([
+            float(self.rect.centerx),
+            float(self.rect.centery),
+            vx,
+            vy
+        ])
+
+        self.ammo -= 1
+        self.shoot_cooldown = 15
+
+        if self.ammo == 0:
+            self.reload_timer = self.reload_duration
+
+    def update_bullets(self):
+        for bullet in self.bullets[:]:
+            bullet[0] += bullet[2]
+            bullet[1] += bullet[3]
+
+            if (
+                bullet[0] < 0
+                or bullet[0] > WIDTH
+                or bullet[1] < 0
+                or bullet[1] > HEIGHT
+            ):
+                self.bullets.remove(bullet)
+
     def draw(self, screen):
-        # Task 1: blink while invincible
         if self.invincibility_timer > 0:
             if (self.invincibility_timer // 5) % 2 == 0:
-                pygame.draw.rect(
-                    screen,
-                    self.color,
-                    self.rect,
-                    border_radius=6
-                )
-        else:
-            pygame.draw.rect(
-                screen,
-                self.color,
-                self.rect,
-                border_radius=6
-            )
+                return
 
-        for b in self.bullets:
+        pygame.draw.rect(screen, (70, 150, 255), self.rect)
+
+        for bullet in self.bullets:
             pygame.draw.circle(
                 screen,
-                (255,220,60),
-                (int(b[0]), int(b[1])),
-                5
+                (255, 230, 80),
+                (int(bullet[0]), int(bullet[1])),
+                4
             )
 
+
+# -----------------------------
+# Game Engine
+# -----------------------------
 
 class GameEngine:
     def __init__(self):
-        pygame.init()
-
-        self.screen = pygame.display.set_mode(
-            (WIDTH, HEIGHT)
-        )
-
-        pygame.display.set_caption("Zombie Escape")
-
-        self.clock = pygame.time.Clock()
-
-        self.font = pygame.font.SysFont(
-            "monospace",
-            24
-        )
-
-        self.big_font = pygame.font.SysFont(
-            "monospace",
-            44,
-            bold=True
-        )
-
         self.reset()
 
     def reset(self):
-        self.player = Player(
-            WIDTH//2,
-            HEIGHT//2
-        )
+        self.player = Player()
 
-        self.zombies = [
-            spawn_zombie(
-                WIDTH,
-                HEIGHT,
-                self.player.rect
-            )
-            for _ in range(4)
-        ]
+        self.zombies = []
 
-        # Task 3: exactly 4 explosive barrels
+        
+   # Initial mixed zombies
+        self.zombies.append(spawn_zombie("standard"))
+        self.zombies.append(spawn_zombie("fast"))
+        self.zombies.append(spawn_zombie("tank"))
+        self.zombies.append(spawn_zombie("standard")) 
         self.barrels = [
             Barrel(120, 120),
             Barrel(650, 120),
@@ -306,108 +255,60 @@ class GameEngine:
         self.kills = 0
         self.kills_to_next = 8
         self.game_over = False
+
         self.start_time = time.time()
 
-    def handle_events(self):
-        for event in pygame.event.get():
-
-            if event.type == pygame.QUIT:
-                return False
-
-            if event.type == pygame.KEYDOWN:
-
-                if event.key == pygame.K_r:
-                    self.reset()
-
-            if event.type == pygame.MOUSEBUTTONDOWN:
-
-                if not self.game_over:
-                    self.player.shoot(event.pos)
-
-        return True
-
     def explode_barrel(self, barrel):
-        """Destroy zombies within the explosion radius."""
         explosion_radius = 100
-        explosion_center = barrel.rect.center
+        center = barrel.rect.center
 
         destroyed = []
 
         for zombie in self.zombies:
-            zx, zy = zombie.rect.center
-
-            distance = math.sqrt(
-                (zx - explosion_center[0]) ** 2 +
-                (zy - explosion_center[1]) ** 2
+            distance = math.hypot(
+                zombie.rect.centerx - center[0],
+                zombie.rect.centery - center[1]
             )
 
             if distance <= explosion_radius:
                 destroyed.append(zombie)
 
         for zombie in destroyed:
-            if zombie in self.zombies:
-                self.zombies.remove(zombie)
-                self.kills += 1
-                self.score += 10
+            self.zombies.remove(zombie)
+            self.kills += 1
+            self.score += 10
 
-        if barrel in self.barrels:
-            self.barrels.remove(barrel)
+        self.barrels.remove(barrel)
 
     def update(self):
         if self.game_over:
             return
 
         keys = pygame.key.get_pressed()
+        self.player.move(keys)
+        self.player.update_bullets()
 
-        self.player.move(
-            keys,
-            WIDTH,
-            HEIGHT
-        )
+        # Zombie movement and player collision
+        for zombie in self.zombies:
+            zombie.update(self.player)
 
-        self.player.update_bullets(
-            WIDTH,
-            HEIGHT
-        )
-
-        self.score = int(
-            time.time() - self.start_time
-        )
-
-        for z in self.zombies:
-
-            z.update(
-                self.player.rect.center
-            )
-
-            if z.rect.colliderect(
-                self.player.rect
-            ):
-
+            if zombie.rect.colliderect(self.player.rect):
                 if self.player.take_damage():
                     self.game_over = True
-                    break
+                    return
 
-        if self.game_over:
-            return
-
-        # Task 3: check bullets against barrels
+        # Barrel collision
         exploded_barrel = None
 
-        for barrel in self.barrels:
+        for bullet in self.player.bullets[:]:
+            bx, by = bullet[0], bullet[1]
 
-            for b in self.player.bullets[:]:
-
-                bx, by = int(b[0]), int(b[1])
-
-                if barrel.rect.collidepoint(
-                    bx,
-                    by
-                ):
+            for barrel in self.barrels:
+                if barrel.rect.collidepoint(bx, by):
                     exploded_barrel = barrel
 
-                    if b in self.player.bullets:
-                        self.player.bullets.remove(b)
+                    if bullet in self.player.bullets:
+                        self.player.bullets.remove(bullet)
 
                     break
 
@@ -417,197 +318,185 @@ class GameEngine:
         if exploded_barrel:
             self.explode_barrel(exploded_barrel)
 
-        # Existing zombie bullet collision
-        dead = []
+        # Normal zombie bullet collision
+        for bullet in self.player.bullets[:]:
+            bx, by = bullet[0], bullet[1]
 
-        for z in self.zombies:
+            hit_zombie = None
 
-            for b in self.player.bullets[:]:
+            for zombie in self.zombies:
+                if zombie.rect.collidepoint(bx, by):
+                    hit_zombie = zombie
+                    break
 
-                bx, by = int(b[0]), int(b[1])
+            if hit_zombie:
+                if bullet in self.player.bullets:
+                    self.player.bullets.remove(bullet)
 
-                if z.rect.collidepoint(
-                    bx,
-                    by
-                ):
+                if hit_zombie.hit():
+                    self.zombies.remove(hit_zombie)
+                    self.kills += 1
+                    self.score += 5
 
-                    if z.hit():
-                        dead.append(z)
-
-                    if b in self.player.bullets:
-                        self.player.bullets.remove(b)
-
-        for z in dead:
-
-            if z in self.zombies:
-                self.zombies.remove(z)
-                self.kills += 1
-                self.score += 10
-
-        # Existing wave progression
+        # Wave progression
         if self.kills >= self.kills_to_next:
-
-            self.kills = 0
             self.wave += 1
+            self.kills = 0
+            self.kills_to_next = 8 + self.wave * 2
 
-            self.kills_to_next = (
-                8 + self.wave * 2
-            )
-
+            # Mix all zombie types into the new wave
             for _ in range(self.wave + 3):
+                zombie_type = random.choice([
+                    "standard",
+                    "fast",
+                    "tank"
+                ])
 
                 self.zombies.append(
-                    spawn_zombie(
-                        WIDTH,
-                        HEIGHT,
-                        self.player.rect
-                    )
+                    spawn_zombie(zombie_type)
                 )
 
-    def draw(self):
-        self.screen.fill(BG)
+    def draw(self, screen):
+        screen.fill(BG)
 
-        for x in range(0, WIDTH, 60):
-
+        # Grid
+        for x in range(0, WIDTH, 40):
             pygame.draw.line(
-                self.screen,
-                (40,45,35),
-                (x,0),
-                (x,HEIGHT),
-                1
+                screen,
+                (30, 30, 36),
+                (x, 0),
+                (x, HEIGHT)
             )
 
-        for y in range(0, HEIGHT, 60):
-
+        for y in range(0, HEIGHT, 40):
             pygame.draw.line(
-                self.screen,
-                (40,45,35),
-                (0,y),
-                (WIDTH,y),
-                1
+                screen,
+                (30, 30, 36),
+                (0, y),
+                (WIDTH, y)
             )
 
-        # Task 3: draw barrels
         for barrel in self.barrels:
-            barrel.draw(self.screen)
+            barrel.draw(screen)
 
-        for z in self.zombies:
-            z.draw(self.screen)
+        for zombie in self.zombies:
+            zombie.draw(screen)
 
-        self.player.draw(self.screen)
+        self.player.draw(screen)
 
-        hud_bg = pygame.Rect(
-            0,
-            0,
-            WIDTH,
-            40
-        )
+        font = pygame.font.SysFont(None, 26)
 
-        pygame.draw.rect(
-            self.screen,
-            (15,20,15),
-            hud_bg
-        )
-
-        # Task 2: ammo/reload HUD
-        if self.player.reload_timer > 0:
-
-            reload_seconds = (
-                self.player.reload_timer / 1000
-            )
-
-            ammo_text = (
-                f"RELOADING: {reload_seconds:.1f}s"
-            )
-
-        else:
-
-            ammo_text = (
-                f"Ammo: {self.player.ammo}/"
-                f"{self.player.max_ammo}"
-            )
-
-        hud = self.font.render(
-            f"HP: {self.player.hp}/"
-            f"{self.player.max_hp}  "
-            f"{ammo_text}  "
-            f"Wave: {self.wave}  "
-            f"Score: {self.score}  "
-            f"Kills: {self.kills}/"
-            f"{self.kills_to_next}",
+        hp_text = font.render(
+            f"HP: {self.player.hp}/{self.player.max_hp}",
             True,
-            (160,220,120)
+            (240, 240, 240)
         )
 
-        self.screen.blit(
-            hud,
-            (8, 8)
+        if self.player.reload_timer > 0:
+            ammo_text = font.render(
+                f"RELOADING: {self.player.reload_timer / 1000:.1f}s",
+                True,
+                (255, 220, 100)
+            )
+        else:
+            ammo_text = font.render(
+                f"Ammo: {self.player.ammo}/{self.player.max_ammo}",
+                True,
+                (240, 240, 240)
+            )
+
+        wave_text = font.render(
+            f"Wave: {self.wave}",
+            True,
+            (240, 240, 240)
         )
+
+        score_text = font.render(
+            f"Score: {self.score}",
+            True,
+            (240, 240, 240)
+        )
+
+        kills_text = font.render(
+            f"Kills: {self.kills}/{self.kills_to_next}",
+            True,
+            (240, 240, 240)
+        )
+
+        screen.blit(hp_text, (10, 10))
+        screen.blit(ammo_text, (10, 38))
+        screen.blit(wave_text, (10, 66))
+        screen.blit(score_text, (10, 94))
+        screen.blit(kills_text, (10, 122))
 
         if self.game_over:
+            overlay = pygame.Surface((WIDTH, HEIGHT))
+            overlay.set_alpha(180)
+            overlay.fill((0, 0, 0))
+            screen.blit(overlay, (0, 0))
 
-            ov = pygame.Surface(
-                (WIDTH, HEIGHT),
-                pygame.SRCALPHA
-            )
+            big_font = pygame.font.SysFont(None, 64)
+            small_font = pygame.font.SysFont(None, 30)
 
-            ov.fill(
-                (0,0,0,160)
-            )
-
-            self.screen.blit(
-                ov,
-                (0,0)
-            )
-
-            m = self.big_font.render(
+            game_over_text = big_font.render(
                 "DEVOURED!",
                 True,
-                (180,40,40)
+                (255, 80, 80)
             )
 
-            s = self.font.render(
-                f"Wave {self.wave} | "
-                f"Score {self.score} | "
-                f"Press R",
+            restart_text = small_font.render(
+                "Press R to restart",
                 True,
-                (200,200,200)
+                (240, 240, 240)
             )
 
-            self.screen.blit(
-                m,
+            screen.blit(
+                game_over_text,
                 (
-                    WIDTH//2-m.get_width()//2,
-                    HEIGHT//2-40
+                    WIDTH // 2 - game_over_text.get_width() // 2,
+                    HEIGHT // 2 - 50
                 )
             )
 
-            self.screen.blit(
-                s,
+            screen.blit(
+                restart_text,
                 (
-                    WIDTH//2-s.get_width()//2,
-                    HEIGHT//2+20
+                    WIDTH // 2 - restart_text.get_width() // 2,
+                    HEIGHT // 2 + 20
                 )
             )
+
+
+def main():
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Zombie Escape")
+
+    clock = pygame.time.Clock()
+    game = GameEngine()
+
+    running = True
+
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    game.reset()
+
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    game.player.shoot(event.pos)
+
+        game.update()
+        game.draw(screen)
 
         pygame.display.flip()
+        clock.tick(FPS)
 
-    def run(self):
-        running = True
-
-        while running:
-
-            running = self.handle_events()
-
-            self.update()
-
-            self.draw()
-
-            self.clock.tick(FPS)
-
-        pygame.quit()
+    pygame.quit()
 
 
 if __name__ == "__main__":
-    engine = GameEngine()
-    engine.run()
+    main()
