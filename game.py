@@ -23,9 +23,11 @@ class Zombie:
         cx, cy = self.rect.center
         dx, dy = px-cx, py-cy
         dist = (dx**2+dy**2)**0.5
+
         if dist:
             self.rect.x += int(dx/dist*self.SPEED)
             self.rect.y += int(dy/dist*self.SPEED)
+
         self.frame += 1
 
     def hit(self):
@@ -35,7 +37,13 @@ class Zombie:
     def draw(self, screen):
         wobble_y = int(math.sin(self.frame*0.2)*3)
         draw_rect = self.rect.move(0, wobble_y)
-        pygame.draw.rect(screen, self.color, draw_rect, border_radius=5)
+
+        pygame.draw.rect(
+            screen,
+            self.color,
+            draw_rect,
+            border_radius=5
+        )
 
         for ex in [draw_rect.x+6, draw_rect.x+18]:
             pygame.draw.circle(
@@ -51,12 +59,50 @@ def spawn_zombie(width, height, player_rect, margin=120):
         x = random.randint(0, width-30)
         y = random.randint(0, height-30)
 
-        rect = pygame.Rect(x, y, 30, 30)
+        rect = pygame.Rect(
+            x,
+            y,
+            30,
+            30
+        )
 
         if not rect.colliderect(
             player_rect.inflate(margin, margin)
         ):
             return Zombie(x, y)
+
+
+class Barrel:
+    """Explosive barrel that destroys nearby zombies."""
+
+    def __init__(self, x, y):
+        self.rect = pygame.Rect(x, y, 28, 36)
+        self.color = (170, 100, 35)
+
+    def draw(self, screen):
+        pygame.draw.rect(
+            screen,
+            self.color,
+            self.rect,
+            border_radius=5
+        )
+
+        # Barrel bands
+        pygame.draw.line(
+            screen,
+            (80, 50, 20),
+            (self.rect.left, self.rect.top + 8),
+            (self.rect.right, self.rect.top + 8),
+            3
+        )
+
+        pygame.draw.line(
+            screen,
+            (80, 50, 20),
+            (self.rect.left, self.rect.bottom - 8),
+            (self.rect.right, self.rect.bottom - 8),
+            3
+        )
 
 
 SPEED = 4
@@ -78,8 +124,6 @@ class Player:
         # Task 2: Ammo system
         self.max_ammo = 12
         self.ammo = self.max_ammo
-
-        # Reload timer in milliseconds
         self.reload_duration = 2000
         self.reload_timer = 0
 
@@ -108,23 +152,24 @@ class Player:
         if self.shoot_cooldown > 0:
             self.shoot_cooldown -= 1
 
-        # Task 1: Invincibility countdown
+        # Task 1: invincibility countdown
         if self.invincibility_timer > 0:
             self.invincibility_timer -= 1
 
-        # Task 2: Reload countdown
+        # Task 2: reload countdown
         if self.reload_timer > 0:
-            self.reload_timer -= 1
+            self.reload_timer -= 1000 / FPS
 
             if self.reload_timer <= 0:
+                self.reload_timer = 0
                 self.ammo = self.max_ammo
 
     def shoot(self, target_pos):
-        # Cannot shoot while reloading
+        # Task 2: cannot shoot while reloading
         if self.reload_timer > 0:
             return
 
-        # Cannot shoot when magazine is empty
+        # Task 2: cannot shoot with empty magazine
         if self.ammo <= 0:
             return
 
@@ -153,11 +198,9 @@ class Player:
         self.bullets.pop(-2)
 
         self.shoot_cooldown = 15
-
-        # One bullet used
         self.ammo -= 1
 
-        # Automatically start reload when magazine becomes empty
+        # Automatically reload when magazine becomes empty
         if self.ammo == 0:
             self.reload_timer = self.reload_duration
 
@@ -184,7 +227,7 @@ class Player:
         return self.hp <= 0
 
     def draw(self, screen):
-        # Task 1: Blink while invincible
+        # Task 1: blink while invincible
         if self.invincibility_timer > 0:
             if (self.invincibility_timer // 5) % 2 == 0:
                 pygame.draw.rect(
@@ -250,6 +293,14 @@ class GameEngine:
             for _ in range(4)
         ]
 
+        # Task 3: exactly 4 explosive barrels
+        self.barrels = [
+            Barrel(120, 120),
+            Barrel(650, 120),
+            Barrel(120, 400),
+            Barrel(650, 400)
+        ]
+
         self.score = 0
         self.wave = 1
         self.kills = 0
@@ -274,6 +325,33 @@ class GameEngine:
                     self.player.shoot(event.pos)
 
         return True
+
+    def explode_barrel(self, barrel):
+        """Destroy zombies within the explosion radius."""
+        explosion_radius = 100
+        explosion_center = barrel.rect.center
+
+        destroyed = []
+
+        for zombie in self.zombies:
+            zx, zy = zombie.rect.center
+
+            distance = math.sqrt(
+                (zx - explosion_center[0]) ** 2 +
+                (zy - explosion_center[1]) ** 2
+            )
+
+            if distance <= explosion_radius:
+                destroyed.append(zombie)
+
+        for zombie in destroyed:
+            if zombie in self.zombies:
+                self.zombies.remove(zombie)
+                self.kills += 1
+                self.score += 10
+
+        if barrel in self.barrels:
+            self.barrels.remove(barrel)
 
     def update(self):
         if self.game_over:
@@ -313,6 +391,33 @@ class GameEngine:
         if self.game_over:
             return
 
+        # Task 3: check bullets against barrels
+        exploded_barrel = None
+
+        for barrel in self.barrels:
+
+            for b in self.player.bullets[:]:
+
+                bx, by = int(b[0]), int(b[1])
+
+                if barrel.rect.collidepoint(
+                    bx,
+                    by
+                ):
+                    exploded_barrel = barrel
+
+                    if b in self.player.bullets:
+                        self.player.bullets.remove(b)
+
+                    break
+
+            if exploded_barrel:
+                break
+
+        if exploded_barrel:
+            self.explode_barrel(exploded_barrel)
+
+        # Existing zombie bullet collision
         dead = []
 
         for z in self.zombies:
@@ -339,6 +444,7 @@ class GameEngine:
                 self.kills += 1
                 self.score += 10
 
+        # Existing wave progression
         if self.kills >= self.kills_to_next:
 
             self.kills = 0
@@ -381,6 +487,10 @@ class GameEngine:
                 1
             )
 
+        # Task 3: draw barrels
+        for barrel in self.barrels:
+            barrel.draw(self.screen)
+
         for z in self.zombies:
             z.draw(self.screen)
 
@@ -399,7 +509,7 @@ class GameEngine:
             hud_bg
         )
 
-        # Task 1 + Task 2 HUD
+        # Task 2: ammo/reload HUD
         if self.player.reload_timer > 0:
 
             reload_seconds = (
